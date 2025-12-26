@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Web Video Editor (Export Enabled)</title>
+    <title>Pro Web Video Editor (Fixed Keyframes & Audio)</title>
     <style>
         :root {
             --bg-dark: #1e1e1e;
@@ -191,19 +191,15 @@
 
 <script>
 /**
- * VIDEO EDITOR CORE - EXPORT ENABLED
+ * VIDEO EDITOR CORE - FIXED KEYFRAMES & AUDIO
  */
 
-// --- CONFIG ---
 const CONFIG = { canvasWidth: 1280, canvasHeight: 720, fps: 30, defaultDuration: 5, pixelsPerSecond: 50 };
-
-// --- STATE ---
 const state = {
     clips: [], tracks: [1, 2], currentTime: 0, isPlaying: false, isExporting: false,
     selectedClipId: null, zoom: CONFIG.pixelsPerSecond, nextClipId: 1, mediaLibrary: []
 };
 
-// --- DOM ELEMENTS ---
 const elements = {
     timelineContent: document.getElementById('timeline-content'),
     tracksContainer: document.getElementById('tracks-container'),
@@ -226,21 +222,18 @@ const elements = {
     exportBtn: document.getElementById('export-btn')
 };
 
-// --- INITIALIZATION ---
 function init() {
     elements.ctx.fillStyle = '#000';
     elements.ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
     renderTracks();
     renderRuler();
 
-    // Listeners
     elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
     elements.fileInput.addEventListener('change', handleFileUpload);
     elements.playBtn.addEventListener('click', togglePlay);
     elements.stopBtn.addEventListener('click', stopPlayback);
     elements.addTrackBtn.addEventListener('click', addTrack);
     elements.zoomSlider.addEventListener('input', (e) => { state.zoom = parseInt(e.target.value); updateTimelineMetrics(); renderRuler(); });
-    
     elements.exportBtn.addEventListener('click', startExport);
 
     elements.timeRuler.addEventListener('click', (e) => {
@@ -336,9 +329,13 @@ function renderClips() {
         if(state.selectedClipId === clip.id) el.classList.add('selected');
         el.style.left = (clip.startTime * state.zoom) + 'px'; el.style.width = (clip.duration * state.zoom) + 'px'; el.innerText = `Clip #${clip.id}`;
         
-        let kfTimes = new Set(); Object.values(clip.effects).forEach(kfArray => kfArray.forEach(k => kfTimes.add(k.t)));
+        // Render Keyframe Markers
+        let kfTimes = new Set();
+        Object.values(clip.effects).forEach(kfArray => kfArray.forEach(k => kfTimes.add(k.t)));
         kfTimes.forEach(t => {
-            const marker = document.createElement('div'); marker.className = 'kf-marker'; marker.style.left = (t * state.zoom) + 'px'; marker.title = `KF at ${formatTime(t)}`; el.appendChild(marker);
+            const marker = document.createElement('div'); marker.className = 'kf-marker'; 
+            marker.style.left = (t * state.zoom) + 'px'; marker.title = `KF at ${formatTime(t)}`; 
+            el.appendChild(marker);
         });
 
         el.addEventListener('mousedown', (e) => { if(e.target.classList.contains('clip-handle')) return; e.stopPropagation(); selectClip(clip.id); startDrag(e, clip); });
@@ -367,34 +364,95 @@ function selectClip(id) {
     if(clip) { elements.noClipMsg.style.display = 'none'; elements.propPanel.style.display = 'block'; updateUIValuesAtPlayhead(); }
     else { elements.noClipMsg.style.display = 'block'; elements.propPanel.style.display = 'none'; }
 }
-function getClipLocalTime(clip) { if(!clip) return 0; return Math.max(0, Math.min(state.currentTime - clip.startTime, clip.duration)); }
+
+function getClipLocalTime(clip) { 
+    if(!clip) return 0; 
+    // Calculate local time relative to the clip start
+    return state.currentTime - clip.startTime; 
+}
+
 function updateUIValuesAtPlayhead() {
     const clip = state.clips.find(c => c.id === state.selectedClipId); if(!clip) return;
     const t = getClipLocalTime(clip);
-    const set = (id, key) => document.getElementById(id).value = getValueAtTime(clip.effects[key], t);
+    
+    // If playhead is before clip starts, show start values. If after, show end values.
+    // Use the interpolation function
+    const set = (id, key) => { 
+        const val = getValueAtTime(clip.effects[key], t);
+        const el = document.getElementById(id);
+        if(el) el.value = val;
+    };
+    
     set('effect-scale', 'scale'); set('effect-rotation', 'rotation'); set('effect-opacity', 'opacity');
     set('effect-brightness', 'brightness'); set('effect-blur', 'blur'); set('effect-grayscale', 'grayscale');
 }
+
 function updateClipEffectsFromUI() {
     const clip = state.clips.find(c => c.id === state.selectedClipId); if(!clip) return;
     const t = getClipLocalTime(clip);
-    const vals = { scale: parseFloat(document.getElementById('effect-scale').value), rotation: parseInt(document.getElementById('effect-rotation').value), opacity: parseFloat(document.getElementById('effect-opacity').value), brightness: parseInt(document.getElementById('effect-brightness').value), blur: parseFloat(document.getElementById('effect-blur').value), grayscale: parseInt(document.getElementById('effect-grayscale').value) };
-    Object.keys(vals).forEach(k => { const idx = clip.effects[k].findIndex(kf => Math.abs(kf.t - t) < 0.1); if(idx >= 0) clip.effects[k][idx].v = vals[k]; });
+    const tolerance = 0.15; // Tolerance to "snap" to existing keyframes while sliding
+
+    const vals = {
+        scale: parseFloat(document.getElementById('effect-scale').value),
+        rotation: parseInt(document.getElementById('effect-rotation').value),
+        opacity: parseFloat(document.getElementById('effect-opacity').value),
+        brightness: parseInt(document.getElementById('effect-brightness').value),
+        blur: parseFloat(document.getElementById('effect-blur').value),
+        grayscale: parseInt(document.getElementById('effect-grayscale').value)
+    };
+
+    // Update existing keyframes if we are on top of one
+    Object.keys(vals).forEach(k => {
+        const kfs = clip.effects[k];
+        const idx = kfs.findIndex(kf => Math.abs(kf.t - t) < tolerance);
+        if(idx >= 0) {
+            kfs[idx].v = vals[k];
+        }
+    });
+    
     if(!state.isPlaying) requestRender();
 }
+
 function addKeyframeForCurrentValues() {
     const clip = state.clips.find(c => c.id === state.selectedClipId); if(!clip) return;
     const t = getClipLocalTime(clip);
-    const add = (id, key) => { const v = parseFloat(document.getElementById(id).value); const kfs = clip.effects[key]; const idx = kfs.findIndex(k => Math.abs(k.t - t) < 0.1); if(idx >= 0) kfs[idx].v = v; else { kfs.push({t, v}); kfs.sort((a,b)=>a.t-b.t); } };
+
+    // Read current values from sliders (what user sees)
+    const add = (id, key) => {
+        const val = parseFloat(document.getElementById(id).value);
+        const kfs = clip.effects[key];
+        
+        // Check if keyframe exists at this time
+        const idx = kfs.findIndex(k => Math.abs(k.t - t) < 0.1);
+        
+        if(idx >= 0) {
+            kfs[idx].v = val; // Update existing
+        } else {
+            kfs.push({t: t, v: val}); // Add new
+            kfs.sort((a,b)=>a.t-b.t); // Sort by time
+        }
+    };
+
     add('effect-scale', 'scale'); add('effect-rotation', 'rotation'); add('effect-opacity', 'opacity');
     add('effect-brightness', 'brightness'); add('effect-blur', 'blur'); add('effect-grayscale', 'grayscale');
-    renderClips();
+    
+    renderClips(); // Refresh diamond markers
 }
+
 function removeKeyframeAtPlayhead() {
     const clip = state.clips.find(c => c.id === state.selectedClipId); if(!clip) return;
     const t = getClipLocalTime(clip);
-    Object.values(clip.effects).forEach(kfs => { const idx = kfs.findIndex(k => Math.abs(k.t - t) < 0.1); if(idx >= 0 && kfs.length > 1) kfs.splice(idx, 1); });
-    renderClips(); updateUIValuesAtPlayhead(); requestRender();
+    
+    Object.values(clip.effects).forEach(kfs => {
+        const idx = kfs.findIndex(k => Math.abs(k.t - t) < 0.2);
+        if(idx >= 0 && kfs.length > 1) { 
+            kfs.splice(idx, 1); 
+        }
+    });
+    
+    renderClips();
+    updateUIValuesAtPlayhead();
+    requestRender();
 }
 
 // --- DRAG/RESIZE ---
@@ -434,8 +492,10 @@ function requestRender() {
     
     active.forEach(clip => {
         const media = state.mediaLibrary.find(m => m.id === clip.mediaId); if(!media) return;
-        const el = media.element; const t = getClipLocalTime(clip);
-        if(media.type === 'video' && Math.abs(el.currentTime - (state.currentTime - clip.startTime + clip.sourceOffset)) > 0.2) el.currentTime = state.currentTime - clip.startTime + clip.sourceOffset;
+        const el = media.element; 
+        const t = getClipLocalTime(clip);
+        
+        if(media.type === 'video' && Math.abs(el.currentTime - t) > 0.2) el.currentTime = t;
         
         const v = (k) => getValueAtTime(clip.effects[k], t);
         const f = `brightness(${v('brightness')}%) contrast(${v('contrast')}%) saturate(${v('saturate')}%) blur(${v('blur')}px) hue-rotate(${v('hue')}deg) sepia(${v('sepia')}%) grayscale(${v('grayscale')}%) invert(${v('invert')}%)`;
@@ -455,13 +515,13 @@ async function startExport() {
     
     // Lock UI
     state.isExporting = true;
-    state.isPlaying = false; // Stop normal playback
+    state.isPlaying = false;
     elements.playBtn.disabled = true;
     elements.stopBtn.disabled = true;
     elements.exportBtn.innerText = "Exporting...";
     elements.exportBtn.disabled = true;
 
-    // 1. Setup Audio Context for Mixing
+    // 1. Setup Audio
     let audioCtx, dest;
     try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -471,27 +531,17 @@ async function startExport() {
 
     // 2. Setup Stream & Recorder
     const canvasStream = elements.canvas.captureStream(30);
-    
-    // Merge Canvas Video Stream + Audio Destination Stream
     const tracks = [...canvasStream.getVideoTracks()];
-    if(dest && dest.stream.getAudioTracks().length > 0) {
-        tracks.push(dest.stream.getAudioTracks()[0]);
-    }
+    if(dest && dest.stream.getAudioTracks().length > 0) tracks.push(dest.stream.getAudioTracks()[0]);
     const combinedStream = new MediaStream(tracks);
 
-    // Detect supported mime types
     let mime = 'video/webm;codecs=vp9';
     let ext = 'webm';
-    if (MediaRecorder.isTypeSupported('video/mp4')) {
-        mime = 'video/mp4';
-        ext = 'mp4';
-    } else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) {
-        mime = 'video/webm;codecs=h264'; // Common in newer Chrome
-    }
+    if (MediaRecorder.isTypeSupported('video/mp4')) { mime = 'video/mp4'; ext = 'mp4'; }
+    else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) { mime = 'video/webm;codecs=h264'; }
 
     const recorder = new MediaRecorder(combinedStream, { mimeType: mime, videoBitsPerSecond: 5000000 });
     const chunks = [];
-
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     
     recorder.onstop = () => {
@@ -510,33 +560,39 @@ async function startExport() {
         elements.exportBtn.innerText = "Export Video";
         elements.exportBtn.disabled = false;
         
-        // Stop audio elements and restore mute
         state.mediaLibrary.forEach(m => {
             if(m.type === 'video') { m.element.pause(); m.element.muted = true; }
         });
         if(audioCtx) audioCtx.close();
     };
 
-    // 3. Playback Loop for Export
+    // 3. Export Loop
     state.currentTime = 0;
     const maxTime = Math.max(0, ...state.clips.map(c => c.startTime + c.duration));
     recorder.start();
 
-    // Prepare videos for playback (unmute for recording, but don't connect to speakers)
+    // Handle Audio Context
     if(audioCtx) {
+        await audioCtx.resume();
+        // Find all clips involved to ensure we prep their audio
         state.clips.forEach(clip => {
             const media = state.mediaLibrary.find(m => m.id === clip.mediaId);
             if(media && media.type === 'video') {
-                media.element.muted = false; // Unmute internally
-                const src = audioCtx.createMediaElementSource(media.element);
-                src.connect(dest); // Connect to recorder only
-                // Do NOT connect to audioCtx.destination (speakers)
+                media.element.muted = false; // Unmute for recording
+                media.element.volume = 1.0;
+                // IMPORTANT: Connect only if not already connected in this context
+                // We can't check existing connections easily without tracking state, 
+                // but creating a new context per export usually works.
+                try {
+                    const source = audioCtx.createMediaElementSource(media.element);
+                    source.connect(dest);
+                } catch(e) {
+                    // Ignore "already connected" errors if running export twice
+                }
             }
         });
-        if(audioCtx.state === 'suspended') await audioCtx.resume();
     }
 
-    // Play loop
     const exportStartTime = performance.now();
     
     function exportLoop(now) {
@@ -546,24 +602,20 @@ async function startExport() {
         state.currentTime = dt;
 
         if(state.currentTime >= maxTime) {
-            recorder.stop(); // This triggers onstop -> download
+            recorder.stop();
             return;
         }
 
         updatePlayhead();
         requestRender();
 
-        // Keep videos synced
+        // Sync Videos
         state.clips.forEach(clip => {
             const media = state.mediaLibrary.find(m => m.id === clip.mediaId);
             if(media && media.type === 'video') {
-                // Check if video is currently active or needs to be primed
-                // For simplicity, we just set currentTime. 
-                // Ideally, we call .play() on active clips.
                 const clipTime = state.currentTime - clip.startTime;
                 if(clipTime >= 0 && clipTime <= clip.duration) {
                    if(media.element.paused) media.element.play();
-                   // Ensure sync
                    if(Math.abs(media.element.currentTime - clipTime) > 0.3) media.element.currentTime = clipTime;
                 } else {
                    if(!media.element.paused) media.element.pause();
