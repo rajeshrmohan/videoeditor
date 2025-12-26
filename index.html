@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Web Video Editor (Export Enabled)</title>
+    <style>
+        :root {
+            --bg-dark: #1e1e1e;
+            --bg-panel: #252526;
+            --bg-header: #333333;
+            --accent: #007acc;
+            --accent-hover: #005f9e;
+            --kf-color: #ffd700;
+            --text-main: #cccccc;
+            --text-light: #ffffff;
+            --border: #3e3e42;
+            --clip-height: 40px;
+            --track-height: 50px;
+            --timeline-ruler-height: 25px;
+        }
+
+        * { box-sizing: border-box; user-select: none; }
+        body {
+            margin: 0; padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-dark); color: var(--text-main);
+            height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        /* --- Header --- */
+        header {
+            height: 50px; background-color: var(--bg-header);
+            display: flex; align-items: center; padding: 0 20px;
+            border-bottom: 1px solid var(--border); justify-content: space-between; flex-shrink: 0;
+        }
+        h1 { font-size: 18px; color: var(--text-light); margin: 0; font-weight: 500; }
+        .header-controls { display: flex; gap: 10px; }
+        button {
+            background-color: var(--accent); color: white; border: none;
+            padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: background 0.2s;
+        }
+        button:hover { background-color: var(--accent-hover); }
+        button.secondary { background-color: transparent; border: 1px solid var(--border); }
+        button.secondary:hover { background-color: rgba(255,255,255,0.1); }
+        button:disabled { background-color: #555; cursor: not-allowed; opacity: 0.7; }
+
+        /* --- Main Layout --- */
+        main { flex: 1; display: flex; overflow: hidden; }
+
+        /* --- Panels --- */
+        #library-panel, #properties-panel {
+            background-color: var(--bg-panel); display: flex; flex-direction: column; flex-shrink: 0;
+        }
+        #library-panel { width: 250px; border-right: 1px solid var(--border); }
+        #properties-panel { width: 300px; border-left: 1px solid var(--border); overflow-y: auto; }
+        
+        .panel-header { padding: 10px; font-weight: bold; border-bottom: 1px solid var(--border); font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+        #file-input { display: none; }
+        #library-content { flex: 1; overflow-y: auto; padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; }
+        
+        .library-item { background: #333; border: 1px solid #444; border-radius: 4px; overflow: hidden; cursor: grab; position: relative; }
+        .library-item:hover { border-color: var(--accent); }
+        .library-item video, .library-item img { width: 100%; height: 80px; object-fit: cover; pointer-events: none; display: block; }
+        .library-item span { display: block; padding: 4px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* --- Properties --- */
+        .prop-group { padding: 15px; border-bottom: 1px solid var(--border); }
+        .prop-group h3 { margin: 0 0 10px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #888; }
+        .control-row { margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+        .control-row label { font-size: 12px; width: 80px; }
+        input[type="range"] { flex: 1; cursor: pointer; }
+        select { width: 100%; background: #111; border: 1px solid #444; color: white; padding: 5px; }
+
+        .kf-controls { display: flex; gap: 5px; margin-bottom: 15px; background: #2d2d30; padding: 8px; border-radius: 4px; }
+        .kf-btn { flex: 1; font-size: 11px; padding: 4px; }
+        .kf-btn.add { background-color: #28a745; }
+        .kf-btn.remove { background-color: #dc3545; }
+
+        /* --- Center Area --- */
+        #editor-area { flex: 1; display: flex; flex-direction: column; background-color: #111; position: relative; min-width: 0; }
+        #player-container { flex: 1; display: flex; justify-content: center; align-items: center; background-color: #000; position: relative; overflow: hidden; min-height: 200px; }
+        canvas { background-color: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5); max-width: 95%; max-height: 95%; max-width: 100%; max-height: 100%; object-fit: contain; }
+
+        /* --- Timeline --- */
+        #timeline-container { height: 350px; background-color: var(--bg-panel); border-top: 1px solid var(--border); display: flex; flex-direction: column; position: relative; flex-shrink: 0; }
+        #timeline-toolbar { height: 40px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 10px; gap: 10px; background: #2d2d30; flex-shrink: 0; }
+        #timeline-scroll-area { flex: 1; overflow: auto; position: relative; width: 100%; background: #1e1e1e; }
+        #timeline-content { position: relative; min-width: 100%; display: inline-block; height: 100%; }
+        
+        #time-ruler { height: var(--timeline-ruler-height); background-color: #2d2d30; border-bottom: 1px solid var(--border); position: relative; cursor: pointer; width: 100%; z-index: 5; }
+        .tick { position: absolute; bottom: 0; border-left: 1px solid #666; height: 5px; font-size: 10px; padding-left: 2px; color: #999; pointer-events: none; user-select: none; }
+        
+        #playhead { position: absolute; top: 0; bottom: 0; width: 2px; background-color: #ff3333; z-index: 100; pointer-events: none; left: 0; }
+        #playhead-handle { position: absolute; top: 0; left: -6px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #ff3333; }
+
+        .track { height: var(--track-height); border-bottom: 1px solid #333; position: relative; background: rgba(255,255,255,0.02); width: 100%; }
+        .track:nth-child(even) { background: rgba(255,255,255,0.05); }
+        .track::before { content: attr(data-track); position: sticky; left: 0; top: 0; z-index: 20; background: #2d2d30; padding: 0 8px; font-size: 10px; color: #888; border-right: 1px solid var(--border); height: 100%; display: flex; align-items: center; width: 40px; pointer-events: none; }
+
+        .clip { position: absolute; height: calc(var(--clip-height) - 4px); top: 2px; background-color: #3a3d41; border: 1px solid #555; border-radius: 4px; cursor: pointer; overflow: hidden; display: flex; align-items: center; padding: 0 5px; color: #fff; font-size: 11px; white-space: nowrap; z-index: 10; }
+        .clip.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); z-index: 11; }
+        
+        .clip-handle { position: absolute; top: 0; bottom: 0; width: 8px; background: rgba(0,0,0,0.2); cursor: col-resize; display: none; z-index: 12; }
+        .clip:hover .clip-handle, .clip.selected .clip-handle { display: block; }
+        .clip-handle.left { left: 0; } .clip-handle.right { right: 0; }
+
+        .kf-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 10px; height: 10px; background-color: var(--kf-color); clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); z-index: 15; cursor: pointer; }
+        .kf-marker:hover { transform: translate(-50%, -50%) scale(1.5); background-color: #fff; }
+
+        .empty-msg { padding: 20px; text-align: center; color: #666; font-style: italic; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Web Video Studio</h1>
+    <div class="header-controls">
+        <button id="play-pause-btn" class="secondary">Play</button>
+        <button id="stop-btn" class="secondary">Stop</button>
+        <button id="add-track-btn" class="secondary">+ Track</button>
+        <button id="export-btn">Export Video</button>
+    </div>
+</header>
+
+<main>
+    <!-- Media Library -->
+    <section id="library-panel">
+        <div class="panel-header">
+            Media Library
+            <button id="upload-btn" style="padding: 2px 8px; font-size: 11px;">+</button>
+            <input type="file" id="file-input" multiple accept="video/*,image/*">
+        </div>
+        <div id="library-content">
+            <div class="empty-msg">Upload media to start</div>
+        </div>
+    </section>
+
+    <!-- Main Editor -->
+    <section id="editor-area">
+        <div id="player-container">
+            <canvas id="preview-canvas" width="1280" height="720"></canvas>
+        </div>
+        
+        <div id="timeline-container">
+            <div id="timeline-toolbar">
+                <span>Timeline</span>
+                <input type="range" id="zoom-slider" min="10" max="200" value="50" title="Zoom">
+            </div>
+            
+            <div id="timeline-scroll-area">
+                <div id="timeline-content">
+                    <div id="time-ruler">
+                        <div id="playhead">
+                            <div id="playhead-handle"></div>
+                        </div>
+                    </div>
+                    <div id="tracks-container"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Properties / Effects -->
+    <section id="properties-panel">
+        <div class="panel-header">Clip Properties</div>
+        <div id="no-clip-selected" style="padding:20px; text-align:center; color:#666; font-size:13px;">Select a clip to edit</div>
+        <div id="clip-properties" style="display:none;">
+            <div class="prop-group">
+                <h3>Keyframes</h3>
+                <div class="kf-controls">
+                    <button class="kf-btn add" id="add-kf-btn">+ Add Key</button>
+                    <button class="kf-btn remove" id="remove-kf-btn">- Remove Key</button>
+                </div>
+            </div>
+            <div class="prop-group">
+                <h3>Transform</h3>
+                <div class="control-row"><label>Scale</label><input type="range" id="effect-scale" min="0.1" max="3.0" step="0.1" value="1.0"></div>
+                <div class="control-row"><label>Rotation</label><input type="range" id="effect-rotation" min="-180" max="180" step="1" value="0"></div>
+                <div class="control-row"><label>Opacity</label><input type="range" id="effect-opacity" min="0" max="1" step="0.05" value="1.0"></div>
+            </div>
+            <div class="prop-group">
+                <h3>Color</h3>
+                <div class="control-row"><label>Brightness</label><input type="range" id="effect-brightness" min="0" max="200" value="100"></div>
+                <div class="control-row"><label>Blur</label><input type="range" id="effect-blur" min="0" max="20" step="0.5" value="0"></div>
+                <div class="control-row"><label>Grayscale</label><input type="range" id="effect-grayscale" min="0" max="100" value="0"></div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+/**
+ * VIDEO EDITOR CORE - EXPORT ENABLED
+ */
+
+// --- CONFIG ---
+const CONFIG = { canvasWidth: 1280, canvasHeight: 720, fps: 30, defaultDuration: 5, pixelsPerSecond: 50 };
+
+// --- STATE ---
+const state = {
+    clips: [], tracks: [1, 2], currentTime: 0, isPlaying: false, isExporting: false,
+    selectedClipId: null, zoom: CONFIG.pixelsPerSecond, nextClipId: 1, mediaLibrary: []
+};
+
+// --- DOM ELEMENTS ---
+const elements = {
+    timelineContent: document.getElementById('timeline-content'),
+    tracksContainer: document.getElementById('tracks-container'),
+    timeRuler: document.getElementById('time-ruler'),
+    playhead: document.getElementById('playhead'),
+    timelineScrollArea: document.getElementById('timeline-scroll-area'),
+    libraryContent: document.getElementById('library-content'),
+    fileInput: document.getElementById('file-input'),
+    uploadBtn: document.getElementById('upload-btn'),
+    canvas: document.getElementById('preview-canvas'),
+    ctx: document.getElementById('preview-canvas').getContext('2d'),
+    playBtn: document.getElementById('play-pause-btn'),
+    stopBtn: document.getElementById('stop-btn'),
+    addTrackBtn: document.getElementById('add-track-btn'),
+    propPanel: document.getElementById('clip-properties'),
+    noClipMsg: document.getElementById('no-clip-selected'),
+    zoomSlider: document.getElementById('zoom-slider'),
+    addKfBtn: document.getElementById('add-kf-btn'),
+    removeKfBtn: document.getElementById('remove-kf-btn'),
+    exportBtn: document.getElementById('export-btn')
+};
+
+// --- INITIALIZATION ---
+function init() {
+    elements.ctx.fillStyle = '#000';
+    elements.ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+    renderTracks();
+    renderRuler();
+
+    // Listeners
+    elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
+    elements.fileInput.addEventListener('change', handleFileUpload);
+    elements.playBtn.addEventListener('click', togglePlay);
+    elements.stopBtn.addEventListener('click', stopPlayback);
+    elements.addTrackBtn.addEventListener('click', addTrack);
+    elements.zoomSlider.addEventListener('input', (e) => { state.zoom = parseInt(e.target.value); updateTimelineMetrics(); renderRuler(); });
+    
+    elements.exportBtn.addEventListener('click', startExport);
+
+    elements.timeRuler.addEventListener('click', (e) => {
+        if(state.isExporting) return;
+        const rect = elements.timeRuler.getBoundingClientRect();
+        state.currentTime = Math.max(0, (e.clientX - rect.left + elements.timelineScrollArea.scrollLeft) / state.zoom);
+        updatePlayhead();
+        updateUIValuesAtPlayhead();
+        requestRender();
+    });
+
+    window.addEventListener('mouseup', () => { if(dragState.isDragging) endDrag(); if(resizeState.isResizing) endResize(); });
+    window.addEventListener('mousemove', (e) => { if(dragState.isDragging) onDrag(e); if(resizeState.isResizing) onResize(e); });
+
+    document.querySelectorAll('input[type=range]').forEach(input => { input.addEventListener('input', updateClipEffectsFromUI); });
+    elements.addKfBtn.addEventListener('click', addKeyframeForCurrentValues);
+    elements.removeKfBtn.addEventListener('click', removeKeyframeAtPlayhead);
+
+    requestAnimationFrame(gameLoop);
+}
+
+// --- MEDIA LIBRARY ---
+function handleFileUpload(e) {
+    const files = Array.from(e.target.files);
+    if(files.length > 0) document.querySelector('.empty-msg')?.remove();
+    files.forEach(file => {
+        const url = URL.createObjectURL(file);
+        const type = file.type.startsWith('video') ? 'video' : 'image';
+        let mediaEl;
+        if(type === 'video') {
+            mediaEl = document.createElement('video');
+            mediaEl.src = url; mediaEl.muted = true; mediaEl.crossOrigin = "anonymous"; mediaEl.preload = 'auto';
+            mediaEl.onloadedmetadata = () => { state.mediaLibrary.push(createMediaItem(file, type, url, mediaEl)); renderLibraryItem(state.mediaLibrary[state.mediaLibrary.length-1]); };
+        } else {
+            mediaEl = document.createElement('img'); mediaEl.src = url;
+            state.mediaLibrary.push(createMediaItem(file, type, url, mediaEl));
+            renderLibraryItem(state.mediaLibrary[state.mediaLibrary.length-1]);
+        }
+    });
+}
+function createMediaItem(file, type, url, el) { return { id: Date.now() + Math.random(), file, type, url, element: el, duration: type === 'video' ? el.duration : 5, name: file.name }; }
+function renderLibraryItem(item) {
+    const div = document.createElement('div'); div.className = 'library-item'; div.draggable = true; div.dataset.id = item.id;
+    const visual = item.type === 'video' ? document.createElement('video') : document.createElement('img');
+    visual.src = item.url; if(item.type === 'video') { visual.muted = true; visual.currentTime = 1; }
+    const label = document.createElement('span'); label.innerText = item.name;
+    div.appendChild(visual); div.appendChild(label);
+    div.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', item.id); e.dataTransfer.effectAllowed = 'copy'; });
+    elements.libraryContent.appendChild(div);
+}
+
+// --- TIMELINE & CLIPS ---
+function addTrack() { state.tracks.push(state.tracks.length + 1); renderTracks(); }
+function renderTracks() {
+    elements.tracksContainer.innerHTML = '';
+    state.tracks.forEach((trackId) => {
+        const trackEl = document.createElement('div'); trackEl.className = 'track'; trackEl.dataset.track = trackId; trackEl.dataset.trackId = trackId;
+        trackEl.addEventListener('dragover', (e) => { e.preventDefault(); trackEl.style.background = 'rgba(255,255,255,0.1)'; });
+        trackEl.addEventListener('dragleave', () => { trackEl.style.background = ''; });
+        trackEl.addEventListener('drop', (e) => {
+            e.preventDefault(); trackEl.style.background = '';
+            const mediaItem = state.mediaLibrary.find(m => m.id == e.dataTransfer.getData('text/plain'));
+            if(mediaItem) {
+                const rect = trackEl.getBoundingClientRect();
+                addClipToTimeline(mediaItem, trackId, (e.clientX - rect.left + elements.timelineScrollArea.scrollLeft) / state.zoom);
+            }
+        });
+        elements.tracksContainer.appendChild(trackEl);
+    });
+    renderClips();
+}
+function renderRuler() {
+    const playhead = elements.playhead; elements.timeRuler.innerHTML = ''; elements.timeRuler.appendChild(playhead);
+    const duration = Math.max(60, ...state.clips.map(c => c.startTime + c.duration)) + 20;
+    elements.timelineContent.style.width = (duration * state.zoom) + 'px';
+    const step = state.zoom < 30 ? 5 : 1;
+    for(let i=0; i<=duration; i+=step) {
+        const tick = document.createElement('div'); tick.className = 'tick'; tick.style.left = (i * state.zoom) + 'px';
+        if(i % (step*2) === 0) { tick.style.height = '12px'; tick.style.borderLeft = '1px solid #999'; tick.innerText = formatTime(i); tick.style.paddingLeft = "4px"; tick.style.color = "#fff"; }
+        elements.timeRuler.appendChild(tick);
+    }
+}
+function addClipToTimeline(mediaItem, trackId, startTime) {
+    const defaultEffects = { scale: [{t: 0, v: 1}], rotation: [{t: 0, v: 0}], opacity: [{t: 0, v: 1}], brightness: [{t: 0, v: 100}], contrast: [{t: 0, v: 100}], saturate: [{t: 0, v: 100}], blur: [{t: 0, v: 0}], hue: [{t: 0, v: 0}], sepia: [{t: 0, v: 0}], grayscale: [{t: 0, v: 0}], invert: [{t: 0, v: 0}], pixelate: [{t: 0, v: 1}] };
+    state.clips.push({ id: state.nextClipId++, mediaId: mediaItem.id, trackId, startTime: Math.max(0, startTime), duration: mediaItem.duration || 5, sourceOffset: 0, effects: defaultEffects });
+    renderClips(); renderRuler();
+}
+function renderClips() {
+    document.querySelectorAll('.clip').forEach(el => el.remove());
+    state.clips.forEach(clip => {
+        const trackEl = document.querySelector(`.track[data-track-id="${clip.trackId}"]`); if(!trackEl) return;
+        const el = document.createElement('div'); el.className = 'clip';
+        if(state.selectedClipId === clip.id) el.classList.add('selected');
+        el.style.left = (clip.startTime * state.zoom) + 'px'; el.style.width = (clip.duration * state.zoom) + 'px'; el.innerText = `Clip #${clip.id}`;
+        
+        let kfTimes = new Set(); Object.values(clip.effects).forEach(kfArray => kfArray.forEach(k => kfTimes.add(k.t)));
+        kfTimes.forEach(t => {
+            const marker = document.createElement('div'); marker.className = 'kf-marker'; marker.style.left = (t * state.zoom) + 'px'; marker.title = `KF at ${formatTime(t)}`; el.appendChild(marker);
+        });
+
+        el.addEventListener('mousedown', (e) => { if(e.target.classList.contains('clip-handle')) return; e.stopPropagation(); selectClip(clip.id); startDrag(e, clip); });
+        const leftHandle = document.createElement('div'); leftHandle.className = 'clip-handle left';
+        const rightHandle = document.createElement('div'); rightHandle.className = 'clip-handle right';
+        leftHandle.addEventListener('mousedown', (e) => { e.stopPropagation(); selectClip(clip.id); startResize(e, clip, 'left'); });
+        rightHandle.addEventListener('mousedown', (e) => { e.stopPropagation(); selectClip(clip.id); startResize(e, clip, 'right'); });
+        el.appendChild(leftHandle); el.appendChild(rightHandle); trackEl.appendChild(el);
+    });
+}
+function updateTimelineMetrics() { renderClips(); renderRuler(); }
+
+// --- INTERPOLATION & PROPERTIES ---
+function lerp(s, e, t) { return s * (1 - t) + e * t; }
+function getValueAtTime(kfs, time) {
+    if(!kfs.length) return 0; if(kfs.length === 1) return kfs[0].v;
+    let s = kfs[0], e = kfs[kfs.length - 1];
+    for(let i = 0; i < kfs.length - 1; i++) { if(time >= kfs[i].t && time <= kfs[i+1].t) { s = kfs[i]; e = kfs[i+1]; break; } }
+    if(time <= s.t) return s.v; if(time >= e.t) return e.v;
+    return lerp(s.v, e.v, (time - s.t) / (e.t - s.t));
+}
+
+function selectClip(id) {
+    state.selectedClipId = id; document.querySelectorAll('.clip').forEach(c => c.classList.remove('selected')); renderClips();
+    const clip = state.clips.find(c => c.id === id);
+    if(clip) { elements.noClipMsg.style.display = 'none'; elements.propPanel.style.display = 'block'; updateUIValuesAtPlayhead(); }
+    else { elements.noClipMsg.style.display = 'block'; elements.propPanel.style.display = 'none'; }
+}
+function getClipLocalTime(clip) { if(!clip) return 0; return Math.max(0, Math.min(state.currentTime - clip.startTime, clip.duration)); }
+function updateUIValuesAtPlayhead() {
+    const clip = state.clips.find(c => c.id === state.selectedClipId); if(!clip) return;
+    const t = getClipLocalTime(clip);
+    const set = (id, key) => document.getElementById(id).value = getValueAtTime(clip.effects[key], t);
+    set('effect-scale', 'scale'); set('effect-rotation', 'rotation'); set('effect-opacity', 'opacity');
+    set('effect-brightness', 'brightness'); set('effect-blur', 'blur'); set('effect-grayscale', 'grayscale');
+}
+function updateClipEffectsFromUI() {
+    const clip = state.clips.find(c => c.id === state.selectedClipId); if(!clip) return;
+    const t = getClipLocalTime(clip);
+    const vals = { scale: parseFloat(document.getElementById('effect-scale').value), rotation: parseInt(document.getElementById('effect-rotation').value), opacity: parseFloat(document.getElementById('effect-opacity').value), brightness: parseInt(document.getElementById('effect-brightness').value), blur: parseFloat(document.getElementById('effect-blur').value), grayscale: parseInt(document.getElementById('effect-grayscale').value) };
+    Object.keys(vals).forEach(k => { const idx = clip.effects[k].findIndex(kf => Math.abs(kf.t - t) < 0.1); if(idx >= 0) clip.effects[k][idx].v = vals[k]; });
+    if(!state.isPlaying) requestRender();
+}
+function addKeyframeForCurrentValues() {
+    const clip = state.clips.find(c => c.id === state.selectedClipId); if(!clip) return;
+    const t = getClipLocalTime(clip);
+    const add = (id, key) => { const v = parseFloat(document.getElementById(id).value); const kfs = clip.effects[key]; const idx = kfs.findIndex(k => Math.abs(k.t - t) < 0.1); if(idx >= 0) kfs[idx].v = v; else { kfs.push({t, v}); kfs.sort((a,b)=>a.t-b.t); } };
+    add('effect-scale', 'scale'); add('effect-rotation', 'rotation'); add('effect-opacity', 'opacity');
+    add('effect-brightness', 'brightness'); add('effect-blur', 'blur'); add('effect-grayscale', 'grayscale');
+    renderClips();
+}
+function removeKeyframeAtPlayhead() {
+    const clip = state.clips.find(c => c.id === state.selectedClipId); if(!clip) return;
+    const t = getClipLocalTime(clip);
+    Object.values(clip.effects).forEach(kfs => { const idx = kfs.findIndex(k => Math.abs(k.t - t) < 0.1); if(idx >= 0 && kfs.length > 1) kfs.splice(idx, 1); });
+    renderClips(); updateUIValuesAtPlayhead(); requestRender();
+}
+
+// --- DRAG/RESIZE ---
+let dragState = { isDragging: false, clip: null, startX: 0, originalTime: 0 };
+let resizeState = { isResizing: false, clip: null, edge: null, startX: 0, originalTime: 0, originalDur: 0 };
+function startDrag(e, clip) { dragState = { isDragging: true, clip, startX: e.clientX, originalTime: clip.startTime }; }
+function onDrag(e) { if(!dragState.isDragging) return; dragState.clip.startTime = Math.max(0, dragState.originalTime + (e.clientX - dragState.startX) / state.zoom); renderClips(); }
+function endDrag() { dragState.isDragging = false; }
+function startResize(e, clip, edge) { resizeState = { isResizing: true, clip, edge, startX: e.clientX, originalTime: clip.startTime, originalDur: clip.duration }; }
+function onResize(e) {
+    if(!resizeState.isResizing) return;
+    const dt = (e.clientX - resizeState.startX) / state.zoom;
+    if(resizeState.edge === 'right') { resizeState.clip.duration = Math.max(0.5, resizeState.originalDur + dt); }
+    else { let t = resizeState.originalTime + dt, d = resizeState.originalDur - dt; if(t < 0) { d += t; t = 0; } if(d < 0.5) d = 0.5; resizeState.clip.startTime = t; resizeState.clip.duration = d; }
+    renderClips(); renderRuler();
+}
+function endResize() { resizeState.isResizing = false; }
+
+// --- RENDER & PLAYBACK ---
+function togglePlay() { if(state.isExporting) return; state.isPlaying = !state.isPlaying; elements.playBtn.innerText = state.isPlaying ? 'Pause' : 'Play'; if(state.isPlaying) { lastTime = performance.now(); requestAnimationFrame(gameLoop); } }
+function stopPlayback() { state.isPlaying = false; state.currentTime = 0; elements.playBtn.innerText = 'Play'; updatePlayhead(); updateUIValuesAtPlayhead(); requestRender(); }
+let lastTime = 0;
+function gameLoop(timestamp) {
+    if(!state.isPlaying) return;
+    const dt = (timestamp - lastTime) / 1000; lastTime = timestamp;
+    state.currentTime += dt;
+    if(state.currentTime > Math.max(0, ...state.clips.map(c => c.startTime + c.duration))) { state.isPlaying = false; elements.playBtn.innerText = 'Play'; return; }
+    updatePlayhead(); updateUIValuesAtPlayhead();
+    const px = state.currentTime * state.zoom; if(px > elements.timelineScrollArea.scrollLeft + elements.timelineScrollArea.clientWidth - 50) elements.timelineScrollArea.scrollLeft = px - 100;
+    requestRender(); requestAnimationFrame(gameLoop);
+}
+function updatePlayhead() { elements.playhead.style.transform = `translateX(${state.currentTime * state.zoom}px)`; }
+function requestRender() {
+    const ctx = elements.ctx; const w = CONFIG.canvasWidth; const h = CONFIG.canvasHeight;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+    let active = state.clips.filter(c => state.currentTime >= c.startTime && state.currentTime < c.startTime + c.duration).sort((a,b) => a.trackId - b.trackId);
+    
+    active.forEach(clip => {
+        const media = state.mediaLibrary.find(m => m.id === clip.mediaId); if(!media) return;
+        const el = media.element; const t = getClipLocalTime(clip);
+        if(media.type === 'video' && Math.abs(el.currentTime - (state.currentTime - clip.startTime + clip.sourceOffset)) > 0.2) el.currentTime = state.currentTime - clip.startTime + clip.sourceOffset;
+        
+        const v = (k) => getValueAtTime(clip.effects[k], t);
+        const f = `brightness(${v('brightness')}%) contrast(${v('contrast')}%) saturate(${v('saturate')}%) blur(${v('blur')}px) hue-rotate(${v('hue')}deg) sepia(${v('sepia')}%) grayscale(${v('grayscale')}%) invert(${v('invert')}%)`;
+        
+        ctx.filter = f; ctx.globalAlpha = v('opacity'); ctx.save();
+        ctx.translate(w/2, h/2); ctx.rotate((v('rotation') * Math.PI)/180); ctx.scale(v('scale'), v('scale'));
+        if(v('pixelate') < 1) { ctx.imageSmoothingEnabled = false; ctx.drawImage(el, -w/2, -h/2, w, h); }
+        else { ctx.imageSmoothingEnabled = true; ctx.drawImage(el, -w/2, -h/2, w, h); }
+        ctx.restore();
+    });
+    ctx.filter = 'none'; ctx.globalAlpha = 1.0;
+}
+
+// --- EXPORT LOGIC ---
+async function startExport() {
+    if(state.clips.length === 0) return alert("Add clips to timeline first!");
+    
+    // Lock UI
+    state.isExporting = true;
+    state.isPlaying = false; // Stop normal playback
+    elements.playBtn.disabled = true;
+    elements.stopBtn.disabled = true;
+    elements.exportBtn.innerText = "Exporting...";
+    elements.exportBtn.disabled = true;
+
+    // 1. Setup Audio Context for Mixing
+    let audioCtx, dest;
+    try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
+        dest = audioCtx.createMediaStreamDestination();
+    } catch(e) { console.warn("Web Audio API not supported. Export will be silent."); }
+
+    // 2. Setup Stream & Recorder
+    const canvasStream = elements.canvas.captureStream(30);
+    
+    // Merge Canvas Video Stream + Audio Destination Stream
+    const tracks = [...canvasStream.getVideoTracks()];
+    if(dest && dest.stream.getAudioTracks().length > 0) {
+        tracks.push(dest.stream.getAudioTracks()[0]);
+    }
+    const combinedStream = new MediaStream(tracks);
+
+    // Detect supported mime types
+    let mime = 'video/webm;codecs=vp9';
+    let ext = 'webm';
+    if (MediaRecorder.isTypeSupported('video/mp4')) {
+        mime = 'video/mp4';
+        ext = 'mp4';
+    } else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) {
+        mime = 'video/webm;codecs=h264'; // Common in newer Chrome
+    }
+
+    const recorder = new MediaRecorder(combinedStream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+    const chunks = [];
+
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    
+    recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `export_video.${ext}`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        // Cleanup
+        state.isExporting = false;
+        elements.playBtn.disabled = false;
+        elements.stopBtn.disabled = false;
+        elements.exportBtn.innerText = "Export Video";
+        elements.exportBtn.disabled = false;
+        
+        // Stop audio elements and restore mute
+        state.mediaLibrary.forEach(m => {
+            if(m.type === 'video') { m.element.pause(); m.element.muted = true; }
+        });
+        if(audioCtx) audioCtx.close();
+    };
+
+    // 3. Playback Loop for Export
+    state.currentTime = 0;
+    const maxTime = Math.max(0, ...state.clips.map(c => c.startTime + c.duration));
+    recorder.start();
+
+    // Prepare videos for playback (unmute for recording, but don't connect to speakers)
+    if(audioCtx) {
+        state.clips.forEach(clip => {
+            const media = state.mediaLibrary.find(m => m.id === clip.mediaId);
+            if(media && media.type === 'video') {
+                media.element.muted = false; // Unmute internally
+                const src = audioCtx.createMediaElementSource(media.element);
+                src.connect(dest); // Connect to recorder only
+                // Do NOT connect to audioCtx.destination (speakers)
+            }
+        });
+        if(audioCtx.state === 'suspended') await audioCtx.resume();
+    }
+
+    // Play loop
+    const exportStartTime = performance.now();
+    
+    function exportLoop(now) {
+        if(!state.isExporting) return;
+
+        const dt = (now - exportStartTime) / 1000;
+        state.currentTime = dt;
+
+        if(state.currentTime >= maxTime) {
+            recorder.stop(); // This triggers onstop -> download
+            return;
+        }
+
+        updatePlayhead();
+        requestRender();
+
+        // Keep videos synced
+        state.clips.forEach(clip => {
+            const media = state.mediaLibrary.find(m => m.id === clip.mediaId);
+            if(media && media.type === 'video') {
+                // Check if video is currently active or needs to be primed
+                // For simplicity, we just set currentTime. 
+                // Ideally, we call .play() on active clips.
+                const clipTime = state.currentTime - clip.startTime;
+                if(clipTime >= 0 && clipTime <= clip.duration) {
+                   if(media.element.paused) media.element.play();
+                   // Ensure sync
+                   if(Math.abs(media.element.currentTime - clipTime) > 0.3) media.element.currentTime = clipTime;
+                } else {
+                   if(!media.element.paused) media.element.pause();
+                }
+            }
+        });
+
+        requestAnimationFrame(exportLoop);
+    }
+
+    requestAnimationFrame(exportLoop);
+}
+
+function formatTime(s) { const m = Math.floor(s / 60); const sec = Math.floor(s % 60); return `${m}:${sec < 10 ? '0'+sec : sec}`; }
+init();
+</script>
+</body>
+</html>
